@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import JointState
+from sensor_msgs.msg import JointState, Imu
+from nav_msgs.msg import Odometry
+from std_msgs.msg import Header
+from geometry_msgs.msg import Pose, Twist, Point, PointStamped
+
 from rclpy.qos import QoSProfile
 
 from unitree_sdk2py.core.channel import ChannelSubscriber, ChannelFactoryInitialize
@@ -83,11 +87,14 @@ class RosBridge(Node):
         self.declare_parameter('interface', 'eth0')
         interface = self.get_parameter('interface').get_parameter_value().string_value
         self.get_logger().info(f'Using interface: {interface}')
+        self.ns = ''
 
         ChannelFactoryInitialize(0, interface)
 
         qos_profile = QoSProfile(depth=10)
-        self.joint_pub = self.create_publisher(JointState, "joint_states", qos_profile)
+        self.joint_pub = self.create_publisher(JointState, f"{self.ns}/joint_states", qos_profile)
+        self.imu_publisher = self.create_publisher(Imu, f"{self.ns}/imu", qos_profile)
+        self.odometry_pub = self.create_publisher(Odometry, f"{self.ns}/odometry", qos_profile)
 
         self.joint_indices = sorted(_joint_index_to_ros_name.keys())
 
@@ -100,6 +107,23 @@ class RosBridge(Node):
         self.subscriber.Init(self.callback_lowstate)
 
     def callback_lowstate(self, msg: LowState_):
+
+        imu_msg = Imu()
+        imu_msg.header = Header()
+        imu_msg.header.stamp = self.get_clock().now().to_msg()
+        imu_msg.header.frame_id = "imu_link"
+
+        imu_msg.orientation.x = msg.imu_state.quaternion[0]
+        imu_msg.orientation.y = msg.imu_state.quaternion[1]
+        imu_msg.orientation.z = msg.imu_state.quaternion[2]
+        imu_msg.orientation.w = msg.imu_state.quaternion[3]
+        imu_msg.angular_velocity.x = msg.imu_state.gyroscope[0]
+        imu_msg.angular_velocity.y = msg.imu_state.gyroscope[1]
+        imu_msg.angular_velocity.z = msg.imu_state.gyroscope[2]
+        imu_msg.linear_acceleration.x = msg.imu_state.accelerometer[0]
+        imu_msg.linear_acceleration.y = msg.imu_state.accelerometer[1]
+        imu_msg.linear_acceleration.z = msg.imu_state.accelerometer[2]
+        self.imu_publisher.publish(imu_msg)
 
         posiciones = []
         for idx in self.joint_indices:

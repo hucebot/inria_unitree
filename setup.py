@@ -22,6 +22,7 @@ setup(
     entry_points={
         'console_scripts': [
             'ros_bridge = inria_unitree.ros_bridge:main',
+            'hand_controller = inria_unitree.hand_controller:main',
         ],
     },
 )
