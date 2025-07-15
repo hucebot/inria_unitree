@@ -24,12 +24,10 @@ from unitree_sdk2py.utils.crc import CRC
 from unitree_sdk2py.comm.motion_switcher.motion_switcher_client import MotionSwitcherClient
 from unitree_sdk2py.g1.loco.g1_loco_client import LocoClient
 
-# control modes
 class Mode:
-    PR = 0  # Series Control (Pitch/Roll)
-    AB = 1  # Parallel Control (A/B)
+    PR = 0
+    AB = 1
 
-# joint indices
 class G1JointIndex:
     LeftHipPitch     = 0
     LeftHipRoll      = 1
@@ -39,7 +37,7 @@ class G1JointIndex:
     LeftAnkleRoll    = 5
     RightHipPitch    = 6
     RightHipRoll     = 7
-    RightHipYaw      = 8
+    RightHipYaw       = 8
     RightKnee        = 9
     RightAnklePitch  = 10
     RightAnkleRoll   = 11
@@ -60,9 +58,8 @@ class G1JointIndex:
     RightWristRoll     = 26
     RightWristPitch    = 27
     RightWristYaw      = 28
-    kNotUsedJoint      = 29  # master enable flag
+    kNotUsedJoint      = 29
 
-# map indices → ROS joint names
 _joint_index_to_ros_name = {
     0:  "left_hip_pitch_joint",
     1:  "left_hip_roll_joint",
@@ -106,56 +103,55 @@ RIGHT_JOINT_INDICES = [
     G1JointIndex.RightWristYaw,
 ]
 
-class CombinedController(Node, QtWidgets.QWidget):
+class JointController(Node, QtWidgets.QWidget):
     def __init__(self):
         Node.__init__(self, 'combined_controller')
         QtWidgets.QWidget.__init__(self)
         self.setWindowTitle("Arm Control & Command")
 
-        # --- prepare buffers ---
         self.current  = [0.0] * len(ALL_JOINT_INDICES)
         self.targets  = [0.0] * len(ALL_JOINT_INDICES)
+        self.smoothed = [0.0] * len(ALL_JOINT_INDICES)
         self.received = False
         self.mode_machine_ = 0
         self.update_mode_machine_ = False
 
-        # --- DDS and interface ---
-        iface = self.declare_parameter('interface', 'eth0').get_parameter_value().string_value
-        try:
-            ChannelFactoryInitialize(0, iface)
-        except Exception as e:
-            self.get_logger().error(f"Failed to initialize channel factory: {e}")
-            sys.exit(1)
+        self.is_estop = False
+        self.using_robot = False
 
-        # loco client (for E-STOP)
-        self.robot = LocoClient()
-        self.robot.SetTimeout(10.0)
-        self.robot.Init()
+        self.alpha = 0.2
 
-        # motion switcher handshake
-        self.msc = MotionSwitcherClient()
-        self.msc.SetTimeout(5.0)
-        self.msc.Init()
-        status, result = self.msc.CheckMode()
-        while result['name']:
-            self.msc.ReleaseMode()
+        if self.using_robot:
+            iface = self.declare_parameter('interface', 'eth0').get_parameter_value().string_value
+            try:
+                ChannelFactoryInitialize(0, iface)
+            except Exception as e:
+                self.get_logger().warn(f"Interface '{iface}' unavailable, falling back: {e}")
+                ChannelFactoryInitialize(0)
+
+            self.robot = LocoClient()
+            self.robot.SetTimeout(10.0)
+            self.robot.Init()
+
+            self.msc = MotionSwitcherClient()
+            self.msc.SetTimeout(5.0)
+            self.msc.Init()
             status, result = self.msc.CheckMode()
-            time.sleep(1)
+            while result['name']:
+                self.msc.ReleaseMode()
+                status, result = self.msc.CheckMode()
+                time.sleep(1)
 
-        # DDS subscriber for state
-        self.lowstate_sub = ChannelSubscriber("rt/lowstate", LowStateType)
-        self.lowstate_sub.Init(self._lowstate_cb, 10)
+            self.lowstate_sub = ChannelSubscriber("rt/lowstate", LowStateType)
+            self.lowstate_sub.Init(self._lowstate_cb, 10)
 
-        # DDS publisher for commands
-        self.cmd_pub = ChannelPublisher("rt/lowcmd", LowCmdType)
-        self.cmd_pub.Init()
-        self.crc     = CRC()
+            self.cmd_pub = ChannelPublisher("rt/lowcmd", LowCmdType)
+            self.cmd_pub.Init()
+            self.crc     = CRC()
 
-        # ROS publisher for /joint_states
         qos = QoSProfile(depth=10)
         self.joint_pub = self.create_publisher(JointState, '/joint_states', qos)
 
-        # build UI: sliders + buttons
         layout = QtWidgets.QVBoxLayout(self)
         self.sliders = {}
         for idx in RIGHT_JOINT_INDICES:
@@ -177,19 +173,16 @@ class CombinedController(Node, QtWidgets.QWidget):
         estop_btn.clicked.connect(self._estop)
         layout.addWidget(estop_btn)
 
-        # periodic timer @20Hz
         timer = QtCore.QTimer(self)
         timer.timeout.connect(self._tick)
         timer.start(50)
 
     def _lowstate_cb(self, msg: LowStateType):
-        # update state readings
         for i in ALL_JOINT_INDICES:
             self.current[i] = msg.motor_state[i].q
-        # initial target sync
         if not self.received:
             self.targets = self.current.copy()
-        # capture mode machine once
+            self.smoothed = self.current.copy()
         if not self.update_mode_machine_:
             self.mode_machine_ = msg.mode_machine
             self.update_mode_machine_ = True
@@ -204,34 +197,54 @@ class CombinedController(Node, QtWidgets.QWidget):
             self.targets[idx] = 0.0
 
     def _estop(self):
-        self.robot.Damp()
+        cmd = LowCmdMessage()
+        cmd.mode_pr = Mode.PR
+        cmd.mode_machine = self.mode_machine_
+        cmd.motor_cmd[G1JointIndex.kNotUsedJoint].q = 1
+        for i in ALL_JOINT_INDICES:
+            m = cmd.motor_cmd[i]
+            desired = 0.0
+            m.mode = 0
+            m.q   = desired
+            m.dq  = 0.0
+            m.tau = 0.0
+            m.kp  = 60.0
+            m.kd  = 1.5
+        cmd.crc = self.crc.Crc(cmd)
+        self.cmd_pub.Write(cmd)
+        self.is_estop = True
 
     def _tick(self):
         if not (self.received and self.update_mode_machine_):
             return
+
+        for i in ALL_JOINT_INDICES:
+            self.smoothed[i] += self.alpha * (self.targets[i] - self.smoothed[i])
+
         self._publish_ros()
-        self._send_cmd()
+        if self.using_robot:
+            self._send_cmd(smoothed=True)
 
     def _publish_ros(self):
         js = JointState()
         js.header.stamp = self.get_clock().now().to_msg()
         js.name     = [_joint_index_to_ros_name[i] for i in ALL_JOINT_INDICES]
-        js.position = [
-            self.targets[i] if i in RIGHT_JOINT_INDICES else self.current[i]
-            for i in ALL_JOINT_INDICES
-        ]
+        js.position = [self.smoothed[i] if i in RIGHT_JOINT_INDICES else self.current[i]
+                       for i in ALL_JOINT_INDICES]
         self.joint_pub.publish(js)
 
-    def _send_cmd(self):
+    def _send_cmd(self, smoothed=False):
+        if self.is_estop:
+            return
         cmd = LowCmdMessage()
-        # set control mode
         cmd.mode_pr = Mode.PR
         cmd.mode_machine = self.mode_machine_
-        # enable all motors
         cmd.motor_cmd[G1JointIndex.kNotUsedJoint].q = 1
         for i in ALL_JOINT_INDICES:
             m = cmd.motor_cmd[i]
-            desired = self.targets[i] if i in RIGHT_JOINT_INDICES else self.current[i]
+            desired = (self.smoothed[i] if smoothed and i in RIGHT_JOINT_INDICES
+                       else self.targets[i] if i in RIGHT_JOINT_INDICES
+                       else self.current[i])
             m.mode = 1 if i in RIGHT_JOINT_INDICES else 0
             m.q   = desired
             m.dq  = 0.0
@@ -246,7 +259,7 @@ def main(args=None):
     rclpy.init(args=args)
     app = QtWidgets.QApplication(sys.argv)
 
-    widget = CombinedController()
+    widget = JointController()
     widget.show()
 
     spinner = QtCore.QTimer()
