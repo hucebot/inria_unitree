@@ -92,7 +92,7 @@ class RightArmIKController(Node):
             n for n in self.all_joint_names if n.startswith("right_")
         }
 
-        self.eff_frame    = 'right_wrist_yaw_joint'
+        self.eff_frame    = 'right_hand_point_contact'
         self.eff_frame_id = self.model.getFrameId(self.eff_frame)
 
         self._init_visualization()
