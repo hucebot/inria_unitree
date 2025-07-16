@@ -27,16 +27,35 @@ from unitree_sdk2py.comm.motion_switcher.motion_switcher_client import MotionSwi
 from unitree_sdk2py.g1.loco.g1_loco_client import LocoClient
 
 _joint_index_to_ros_name = {
-    0: "left_hip_pitch_joint",   1: "left_hip_roll_joint",    2: "left_hip_yaw_joint",
-    3: "left_knee_joint",        4: "left_ankle_pitch_joint", 5: "left_ankle_roll_joint",
-    6: "right_hip_pitch_joint",  7: "right_hip_roll_joint",   8: "right_hip_yaw_joint",
-    9: "right_knee_joint",      10: "right_ankle_pitch_joint",11: "right_ankle_roll_joint",
-   12: "waist_yaw_joint",       13: "waist_roll_joint",      14: "waist_pitch_joint",
-   15: "left_shoulder_pitch_joint", 16: "left_shoulder_roll_joint", 17: "left_shoulder_yaw_joint",
-   18: "left_elbow_joint",      19: "left_wrist_roll_joint", 20: "left_wrist_pitch_joint",
-   21: "left_wrist_yaw_joint",  22: "right_shoulder_pitch_joint",23: "right_shoulder_roll_joint",
-   24: "right_shoulder_yaw_joint",25: "right_elbow_joint",    26: "right_wrist_roll_joint",
-   27: "right_wrist_pitch_joint",28: "right_wrist_yaw_joint",
+    0: "left_hip_pitch_joint",   
+    1: "left_hip_roll_joint",    
+    2: "left_hip_yaw_joint",
+    3: "left_knee_joint",        
+    4: "left_ankle_pitch_joint", 
+    5: "left_ankle_roll_joint",
+    6: "right_hip_pitch_joint",  
+    7: "right_hip_roll_joint",   
+    8: "right_hip_yaw_joint",
+    9: "right_knee_joint",      
+    10: "right_ankle_pitch_joint",
+    11: "right_ankle_roll_joint",
+   12: "waist_yaw_joint",       
+   13: "waist_roll_joint",      
+   14: "waist_pitch_joint",
+   15: "left_shoulder_pitch_joint", 
+   16: "left_shoulder_roll_joint", 
+   17: "left_shoulder_yaw_joint",
+   18: "left_elbow_joint",      
+   19: "left_wrist_roll_joint", 
+   20: "left_wrist_pitch_joint",
+   21: "left_wrist_yaw_joint",  
+   22: "right_shoulder_pitch_joint",
+   23: "right_shoulder_roll_joint",
+   24: "right_shoulder_yaw_joint",
+   25: "right_elbow_joint",    
+   26: "right_wrist_roll_joint",
+   27: "right_wrist_pitch_joint",
+   28: "right_wrist_yaw_joint",
 }
 ALL_JOINT_INDICES = list(range(29))
 
@@ -95,8 +114,6 @@ class RightArmIKController(Node):
         self.eff_frame    = 'right_hand_point_contact'
         self.eff_frame_id = self.model.getFrameId(self.eff_frame)
 
-        self._init_visualization()
-
         self._init_timer = self.create_timer(5.0, self._on_init_timeout)
 
 
@@ -143,7 +160,15 @@ class RightArmIKController(Node):
 
 
     def _lowstate_cb(self, msg: LowStateType):
-        pass
+        for i in ALL_JOINT_INDICES:
+            self.current[i] = msg.motor_state[i].q
+        if not self.received:
+            self.targets = self.current.copy()
+            self.smoothed = self.current.copy()
+        if not self.update_mode_machine_:
+            self.mode_machine_ = msg.mode_machine
+            self.update_mode_machine_ = True
+        self.received = True
 
 
     def _joint_state_cb(self, msg: JointState):
