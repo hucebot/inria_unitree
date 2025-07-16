@@ -40,7 +40,6 @@ _joint_index_to_ros_name = {
 }
 ALL_JOINT_INDICES = list(range(29))
 
-
 class RightArmIKController(Node):
     def __init__(self):
         super().__init__('right_arm_ik_controller')
@@ -49,7 +48,7 @@ class RightArmIKController(Node):
         self.using_robot = self.declare_parameter('use_robot', False).value
         self.iface       = self.declare_parameter('interface', 'eth0').value
 
-        self.joint_pub      = self.create_publisher(JointState, '/joint_states', qos)
+        self.joint_pub = self.create_publisher(JointState, '/joint_states', qos)
         self._received_joint = False
         self._init_done      = False
 
@@ -57,7 +56,7 @@ class RightArmIKController(Node):
             self._init_unitree()
 
         self.create_subscription(JointState,  '/joint_states', self._joint_state_cb, qos)
-        self.create_subscription(PoseStamped, '/right_hand_goal',     self._ik_target_cb, qos)
+        self.create_subscription(PoseStamped, '/right_hand_goal', self._ik_target_cb,   qos)
 
         pkg_share = get_package_share_directory('g1_description')
         urdf_path = os.path.join(pkg_share, 'description_files', 'urdf', 'g1_29dof.urdf')
@@ -76,6 +75,7 @@ class RightArmIKController(Node):
             self.get_logger().info(f"  [{j:2d}] name='{name}', nq={joint.nq}, idx_q={joint.idx_q}")
 
         self.q = pin.neutral(self.model)
+
         self.name_to_q_index = {}
         for j in range(1, self.model.njoints):
             joint = self.model.joints[j]
@@ -83,7 +83,14 @@ class RightArmIKController(Node):
                 self.name_to_q_index[self.model.names[j]] = joint.idx_q
 
         self.actuated_idx = sorted(self.name_to_q_index.values())
-        self.get_logger().info(f"Actuated idx (q): {self.actuated_idx}")
+
+        self.all_joint_names = [
+            n for _, n in sorted(_joint_index_to_ros_name.items(), key=lambda x: x[0])
+        ]
+
+        self.right_joint_names = {
+            n for n in self.all_joint_names if n.startswith("right_")
+        }
 
         self.eff_frame    = 'right_wrist_yaw_joint'
         self.eff_frame_id = self.model.getFrameId(self.eff_frame)
@@ -123,9 +130,8 @@ class RightArmIKController(Node):
     def _publish_zero_joints(self):
         js = JointState()
         js.header.stamp = self.get_clock().now().to_msg()
-        names = [n for _, n in sorted(_joint_index_to_ros_name.items(), key=lambda x: x[0])]
-        js.name     = names
-        js.position = [0.0] * len(names)
+        js.name     = self.all_joint_names
+        js.position = [0.0] * len(self.all_joint_names)
         self.joint_pub.publish(js)
         self.get_logger().info('Published zero joint states')
 
@@ -155,25 +161,25 @@ class RightArmIKController(Node):
         p = msg.pose.position
         o = msg.pose.orientation
         quat = pin.Quaternion(o.w, o.x, o.y, o.z)
-        tgt = SE3(quat.matrix(), np.array([p.x, p.y, p.z]))
+        tgt  = SE3(quat.matrix(), np.array([p.x, p.y, p.z]))
 
         q_sol = self._solve_ik(tgt)
-
         self.q = q_sol
         self.meshcat_vis.display(self.q)
 
         js = JointState()
         js.header.stamp = self.get_clock().now().to_msg()
-        names = [n for _, n in sorted(_joint_index_to_ros_name.items(), key=lambda x: x[0])]
-        js.name     = names
-        js.position = [float(self.q[idx]) for idx in self.actuated_idx]
+        js.name = self.all_joint_names
+        js.position = [
+            float(self.q[self.name_to_q_index[name]]) if name in self.right_joint_names else 0.0
+            for name in self.all_joint_names
+        ]
         self.joint_pub.publish(js)
 
 
     def _solve_ik(self, target: SE3, max_iter=50, tol=1e-4, damping=1e-6) -> np.ndarray:
         q = self.q.copy()
-
-        free_nv = sum(joint.nv for joint in self.model.joints if joint.nq > 1)
+        free_nv = sum(j.nv for j in self.model.joints if j.nq > 1)
 
         for _ in range(max_iter):
             pin.forwardKinematics(self.model, self.data, q)
@@ -185,16 +191,14 @@ class RightArmIKController(Node):
             if np.linalg.norm(err) < tol:
                 break
 
-            J6 = pin.computeFrameJacobian(
+            J6    = pin.computeFrameJacobian(
                 self.model, self.data, q,
                 self.eff_frame_id,
                 pin.LOCAL_WORLD_ALIGNED
             )
-
             J_red = J6[:, free_nv:]
-
-            JJt = J_red @ J_red.T
-            dq  = J_red.T @ np.linalg.solve(JJt + damping * np.eye(6), err)
+            JJt   = J_red @ J_red.T
+            dq    = J_red.T @ np.linalg.solve(JJt + damping * np.eye(6), err)
 
             q[self.actuated_idx] += dq
 
