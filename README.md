@@ -1,4 +1,4 @@
-#UNITREE_INRIA
+# UNITREE_INRIA
 
 
 [![License](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](
@@ -8,7 +8,13 @@ https://docs.ros.org/en/noetic/index.html)
 [![Ros Version](https://img.shields.io/badge/ROS2-Humble-green)](
 https://docs.ros.org/en/humble/index.html)
 
-ROS2 Package to read the information from the unitree robots using the SDK and convert them into ROS2 information.
+ROS2 Package to control the  Unitree G1 robot. This package provides different ways to control the robot.
+
+
+## Visual Overview
+| **Joint Controller** | **Cartesian Controller** |
+|---------------------|--------------------|
+| <img src="https://github.com/hucebot/inria_unitreeblob/main/images/joint_controller.gif" alt="Static Sensors" width="400"> | <img src="https://github.com/hucebot/inria_unitreeblob/main/images/cartesian_controller.gif" alt="Moving Sensors" width="400"> |
 
 ## Table of Contents
 
@@ -41,8 +47,20 @@ Then, source the workspace:
 ```bash
 source install/setup.bash
 ```
-Now you can run the unitree node:
+To visualize the real robot in RViz, you can run the following command:
 
 ```bash
 ros2 run inria_unitree ros_bridge --ros-args -p interface:=<your_interface>
+```
+
+To control the robot, using the joint controller, you can run the following command:
+```bash
+ros2 run inria_unitree joint_controller --ros-args -p interface:=<your_interface>
+```
+To control the robot, using the cartesian controller, you can run the following command:
+```bash
+ros2 run inria_unitree cartesian_controller --ros-args -p interface:=<your_interface>
+```
+```bash
+ros2 run inria_unitree interactive_marker
 ```
