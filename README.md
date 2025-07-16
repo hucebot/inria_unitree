@@ -14,7 +14,7 @@ ROS2 Package to control the  Unitree G1 robot. This package provides different w
 ## Visual Overview
 | **Joint Controller** | **Cartesian Controller** |
 |---------------------|--------------------|
-| <img src="https://github.com/hucebot/inria_unitreeblob/main/images/joint_controller.gif" alt="Static Sensors" width="400"> | <img src="https://github.com/hucebot/inria_unitreeblob/main/images/cartesian_controller.gif" alt="Moving Sensors" width="400"> |
+| <img src="https://github.com/hucebot/inria_unitree/blob/main/images/joint_controller.gif" alt="Static Sensors" width="400"> | <img src="https://github.com/hucebot/inria_unitree/blob/main/images/cartesian_controller.gif" alt="Moving Sensors" width="400"> |
 
 ## Table of Contents
 
