@@ -24,6 +24,7 @@ setup(
             'ros_bridge = inria_unitree.ros_bridge:main',
             'cartesian_controller = inria_unitree.cartesian_controller:main',
             'joint_controller = inria_unitree.joint_controller:main',
+            'interactive_marker = inria_unitree.interactive_marker:main',
         ],
     },
 )

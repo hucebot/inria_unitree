@@ -188,7 +188,6 @@ class JointController(Node, QtWidgets.QWidget):
         timer.start(50)
 
     def _lowstate_cb(self, msg: LowStateType):
-        """Callback DDS LowState → actualiza posición real."""
         for i in ALL_JOINT_INDICES:
             self.current[i] = msg.motor_state[i].q
         if not self.received:

@@ -41,8 +41,7 @@ WORKDIR /ros2_ws
 RUN . /opt/ros/${ROS_DISTRO}/setup.sh && \
     colcon build --cmake-args -DROS_EDITION=ROS2 -DHUMBLE_ROS=humble
 
-RUN pip install pyqt5 pinocchio
-RUN apt install ros-$ROS_DISTRO-pinocchio
+RUN pip install pyqt5 pin meshcat
 
 RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> /root/.bashrc && \
     echo "source /ros2_ws/install/setup.bash" >> /root/.bashrc
