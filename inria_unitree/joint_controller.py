@@ -106,6 +106,15 @@ RIGHT_JOINT_INDICES = [
     G1JointIndex.RightWristYaw,
 ]
 
+TORSO_JOINT_INDICES = [
+    G1JointIndex.WaistYaw,
+    G1JointIndex.WaistRoll,
+    G1JointIndex.WaistPitch,
+]
+
+
+CONTROLLED_JOINT_INDICES = RIGHT_JOINT_INDICES + TORSO_JOINT_INDICES
+
 
 class JointController(Node, QtWidgets.QWidget):
     def __init__(self):
@@ -120,20 +129,16 @@ class JointController(Node, QtWidgets.QWidget):
         self.mode_machine_ = 0
         self.update_mode_machine_ = False
         self.is_estop = False
-
         self.alpha = 0.2
-        self.using_robot = self.declare_parameter(
-            "use_robot", False
-        ).get_parameter_value().bool_value
+
+        self.using_robot = self.declare_parameter("use_robot", True).get_parameter_value().bool_value
         iface = self.declare_parameter("interface", "eth0").get_parameter_value().string_value
 
         if self.using_robot:
             try:
                 ChannelFactoryInitialize(0, iface)
             except Exception as e:
-                self.get_logger().warn(
-                    f"Interface '{iface}' unavailable, falling back: {e}"
-                )
+                self.get_logger().warn(f"Interface '{iface}' unavailable, falling back: {e}")
                 ChannelFactoryInitialize(0)
 
             self.robot = LocoClient()
@@ -161,6 +166,8 @@ class JointController(Node, QtWidgets.QWidget):
 
         qos = QoSProfile(depth=10)
         self.joint_pub = self.create_publisher(JointState, "/joint_states", qos)
+
+        self.create_subscription(JointState, '/ik_joint_states', self._ik_cmd_cb, qos)
 
         layout = QtWidgets.QVBoxLayout(self)
         self.sliders = {}
@@ -197,6 +204,18 @@ class JointController(Node, QtWidgets.QWidget):
             self.mode_machine_ = msg.mode_machine
             self.update_mode_machine_ = True
         self.received = True
+
+    def _ik_cmd_cb(self, msg: JointState):
+        if list(msg.name) == [_joint_index_to_ros_name[i] for i in ALL_JOINT_INDICES]:
+            self.targets = list(msg.position)
+        else:
+            name_to_idx = {v: k for k, v in _joint_index_to_ros_name.items()}
+            for name, pos in zip(msg.name, msg.position):
+                idx = name_to_idx.get(name)
+                if idx is not None:
+                    self.targets[idx] = pos
+
+
 
     def _on_slider(self, idx: int, deg: int):
         self.targets[idx] = math.radians(deg)
@@ -243,41 +262,42 @@ class JointController(Node, QtWidgets.QWidget):
         js.header.stamp = self.get_clock().now().to_msg()
         js.name = [_joint_index_to_ros_name[i] for i in ALL_JOINT_INDICES]
         js.position = [
-            self.smoothed[i] if i in RIGHT_JOINT_INDICES else self.current[i]
+            self.smoothed[i] if i in CONTROLLED_JOINT_INDICES else self.current[i]
             for i in ALL_JOINT_INDICES
         ]
         self.joint_pub.publish(js)
 
+
     def _send_cmd(self, *, smoothed: bool = False):
         if self.is_estop or not self.using_robot:
             return
-
         cmd = LowCmdMessage()
         cmd.mode_pr = Mode.PR
         cmd.mode_machine = self.mode_machine_
         cmd.motor_cmd[G1JointIndex.kNotUsedJoint].q = 1
-
         for i in ALL_JOINT_INDICES:
             m = cmd.motor_cmd[i]
-            if i in RIGHT_JOINT_INDICES:
+            if i in CONTROLLED_JOINT_INDICES:
                 desired = self.smoothed[i] if smoothed else self.targets[i]
                 m.mode = 1
+                m.q = desired
+                m.kp = 60.0
+                m.kd = 1.5
             else:
-                desired = self.current[i]
-                m.mode = 0
-            m.q = desired
+                m.mode = 1
+                m.q = 0.0
+                m.kp = 60.0
+                m.kd = 1.5
             m.dq = 0.0
             m.tau = 0.0
-            m.kp = 60.0
-            m.kd = 1.5
-
         cmd.crc = self.crc.Crc(cmd)
         self.cmd_pub.Write(cmd)
+
+
 
 def main(args=None):
     rclpy.init(args=args)
     app = QtWidgets.QApplication(sys.argv)
-
     widget = JointController()
     widget.show()
 
@@ -288,7 +308,6 @@ def main(args=None):
     app.exec_()
     widget.destroy_node()
     rclpy.shutdown()
-
 
 if __name__ == "__main__":
     main()
