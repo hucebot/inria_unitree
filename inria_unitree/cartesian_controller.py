@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 
 import os
-import time
-import threading
 import sys
+import time
 import numpy as np
 
 import rclpy
@@ -15,10 +14,9 @@ from geometry_msgs.msg import PoseStamped
 import pinocchio as pin
 from pinocchio import SE3
 
-import meshcat
 from ament_index_python.packages import get_package_share_directory
-
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton
+from PyQt5 import QtCore
 
 from unitree_sdk2py.core.channel import (
     ChannelFactoryInitialize, ChannelSubscriber, ChannelPublisher
@@ -29,9 +27,11 @@ from unitree_sdk2py.utils.crc import CRC
 from unitree_sdk2py.comm.motion_switcher.motion_switcher_client import MotionSwitcherClient
 from unitree_sdk2py.g1.loco.g1_loco_client import LocoClient
 
+
 class Mode:
     PR = 0
     AB = 1
+
 
 class G1JointIndex:
     LeftHipPitch = 0
@@ -65,6 +65,7 @@ class G1JointIndex:
     RightWristYaw = 28
     kNotUsedJoint = 29
 
+
 _joint_index_to_ros_name = {
     0: "left_hip_pitch_joint",
     1: "left_hip_roll_joint",
@@ -96,67 +97,83 @@ _joint_index_to_ros_name = {
     27: "right_wrist_pitch_joint",
     28: "right_wrist_yaw_joint",
 }
-ALL_JOINT_INDICES = list(range(29))
 
-class RightArmIKController(Node):
+ALL_JOINT_INDICES = list(range(29))
+RIGHT_JOINT_INDICES = [
+    G1JointIndex.RightShoulderPitch,
+    G1JointIndex.RightShoulderRoll,
+    G1JointIndex.RightShoulderYaw,
+    G1JointIndex.RightElbow,
+    G1JointIndex.RightWristRoll,
+    G1JointIndex.RightWristPitch,
+    G1JointIndex.RightWristYaw,
+]
+
+
+class RightArmIKController(Node, QWidget):
     def __init__(self):
-        super().__init__('right_arm_ik_controller')
-        qos = QoSProfile(depth=10)
+        Node.__init__(self, 'right_arm_ik_controller')
+        QWidget.__init__(self)
+        self.setWindowTitle("Right Arm IK & E-STOP")
 
         self.using_robot = self.declare_parameter('use_robot', False).value
-        self.iface       = self.declare_parameter('interface', 'eth0').value
+        self.iface = self.declare_parameter('interface', 'eth0').value
 
-        self.joint_pub = self.create_publisher(JointState, '/joint_states', qos)
-
-        self._received_joint = False
-        self._init_done      = False
-
-        self.alpha  = 0.2
-        self.max_dq = 0.05
-
+        self.current = [0.0] * len(ALL_JOINT_INDICES)
+        self.targets = [0.0] * len(ALL_JOINT_INDICES)
+        self.smoothed = [0.0] * len(ALL_JOINT_INDICES)
         self.emergency_stop = False
+        self.alpha = 0.2
+        self.max_dq = 0.2
+        self.received_unitree = False
+        self.received_joint = False
+        self.update_mode_machine_ = False
+
+        qos = QoSProfile(depth=10)
+        self.joint_pub = self.create_publisher(JointState, '/joint_states', qos)
 
         if self.using_robot:
             self._init_unitree()
 
-        self.create_subscription(JointState,  '/joint_states', self._joint_state_cb, qos)
-        self.create_subscription(PoseStamped, '/right_hand_goal', self._ik_target_cb,   qos)
+        self.create_subscription(JointState, '/joint_states', self._joint_state_cb, qos)
+        self.create_subscription(PoseStamped, '/right_hand_goal', self._ik_target_cb, qos)
 
         pkg_share = get_package_share_directory('g1_description')
-        urdf_path = os.path.join(pkg_share, 'description_files', 'urdf', 'g1_29dof.urdf')
-        mesh_dir  = os.path.join(pkg_share, 'description_files', 'meshes')
+        urdf = os.path.join(pkg_share, 'description_files', 'urdf', 'g1_29dof.urdf')
+        mesh = os.path.join(pkg_share, 'description_files', 'meshes')
         self.model, self.collision_model, self.visual_model = pin.buildModelsFromUrdf(
-            urdf_path,
-            package_dirs=[mesh_dir],
-            root_joint=pin.JointModelFreeFlyer()
+            urdf, package_dirs=[mesh], root_joint=pin.JointModelFreeFlyer()
         )
         self.data = pin.Data(self.model)
-
         self.q = pin.neutral(self.model)
         self.q_prev = self.q.copy()
 
         self.name_to_q_index = {}
         for j in range(1, self.model.njoints):
             if self.model.joints[j].nq == 1:
-                name = self.model.names[j]
-                if name in _joint_index_to_ros_name.values():
-                    self.name_to_q_index[name] = self.model.joints[j].idx_q
+                nm = self.model.names[j]
+                if nm in _joint_index_to_ros_name.values():
+                    self.name_to_q_index[nm] = self.model.joints[j].idx_q
         self.actuated_idx = sorted(self.name_to_q_index.values())
 
-        self.all_joint_names = [
-            _joint_index_to_ros_name[i] for i in range(len(_joint_index_to_ros_name))
-        ]
-        self.right_joint_names = {n for n in self.all_joint_names if n.startswith("right_")}
-
-        self.eff_frame    = 'right_hand_point_contact'
+        self.eff_frame = 'right_hand_point_contact'
         self.eff_frame_id = self.model.getFrameId(self.eff_frame)
 
+        layout = QVBoxLayout(self)
+        self.estop_btn = QPushButton("EMERGENCY STOP")
+        self.estop_btn.setStyleSheet("font-size: 24px; background-color: red; color: white;")
+        self.estop_btn.clicked.connect(self._on_estop)
+        layout.addWidget(self.estop_btn)
+
         self._init_timer = self.create_timer(5.0, self._on_init_timeout)
+        self._qt_spin = QtCore.QTimer(self)
+        self._qt_spin.timeout.connect(lambda: rclpy.spin_once(self, timeout_sec=0))
+        self._qt_spin.start(10)
 
     def _init_unitree(self):
         ChannelFactoryInitialize(0, self.iface)
         self.robot = LocoClient(); self.robot.SetTimeout(10.0); self.robot.Init()
-        self.msc   = MotionSwitcherClient(); self.msc.SetTimeout(5.0); self.msc.Init()
+        self.msc = MotionSwitcherClient(); self.msc.SetTimeout(5.0); self.msc.Init()
         status, result = self.msc.CheckMode()
         while result['name']:
             self.msc.ReleaseMode()
@@ -165,38 +182,33 @@ class RightArmIKController(Node):
         self.lowstate_sub = ChannelSubscriber('rt/lowstate', LowStateType)
         self.lowstate_sub.Init(self._lowstate_cb, 10)
         self.cmd_pub = ChannelPublisher('rt/lowcmd', LowCmdType); self.cmd_pub.Init()
-        self.crc     = CRC()
-
-    def _publish_zero_joints(self):
-        js = JointState()
-        js.header.stamp = self.get_clock().now().to_msg()
-        js.name     = self.all_joint_names
-        js.position = [0.0] * len(self.all_joint_names)
-        self.joint_pub.publish(js)
-        self.get_logger().info('Published zero joint states')
+        self.crc = CRC()
 
     def _on_init_timeout(self):
-        if not self._received_joint and not self._init_done:
-            self._publish_zero_joints()
-            self._init_done = True
+        if not self.received_joint:
+            js = JointState()
+            js.header.stamp = self.get_clock().now().to_msg()
+            js.name = list(_joint_index_to_ros_name.values())
+            js.position = [0.0] * len(_joint_index_to_ros_name)
+            self.joint_pub.publish(js)
+            self.get_logger().info('Published zero joint states')
         self.destroy_timer(self._init_timer)
 
     def _lowstate_cb(self, msg: LowStateType):
         for i in ALL_JOINT_INDICES:
             self.current[i] = msg.motor_state[i].q
-        if not hasattr(self, 'received') or not self.received:
-            self.targets  = self.current.copy()
+        if not self.received_unitree:
+            self.targets = self.current.copy()
             self.smoothed = self.current.copy()
-        if not hasattr(self, 'update_mode_machine_') or not self.update_mode_machine_:
-            self.mode_machine_      = msg.mode_machine
+        if not self.update_mode_machine_:
+            self.mode_machine_ = msg.mode_machine
             self.update_mode_machine_ = True
-        self.received = True
+        self.received_unitree = True
 
     def _joint_state_cb(self, msg: JointState):
         if self.emergency_stop:
             return
-        if not self._received_joint:
-            self._received_joint = True
+        self.received_joint = True
         for name, pos in zip(msg.name, msg.position):
             if name in self.name_to_q_index:
                 self.q[self.name_to_q_index[name]] = pos
@@ -204,29 +216,20 @@ class RightArmIKController(Node):
     def _ik_target_cb(self, msg: PoseStamped):
         if self.emergency_stop:
             return
-        p = msg.pose.position
-        o = msg.pose.orientation
+        p, o = msg.pose.position, msg.pose.orientation
         quat = pin.Quaternion(o.w, o.x, o.y, o.z)
-        tgt  = SE3(quat.matrix(), np.array([p.x, p.y, p.z]))
-
-        q_sol = self._solve_ik(tgt)
+        target = SE3(quat.matrix(), np.array([p.x, p.y, p.z]))
+        q_sol = self._solve_ik(target)
         if q_sol is None:
             return
-
-        dq = q_sol - self.q_prev
-        dq = np.clip(dq, -self.max_dq, self.max_dq)
+        dq = np.clip(q_sol - self.q_prev, -self.max_dq, self.max_dq)
         q_step = self.q_prev + dq
-
         self.q = (1 - self.alpha) * self.q_prev + self.alpha * q_step
         self.q_prev = self.q.copy()
-
         js = JointState()
         js.header.stamp = self.get_clock().now().to_msg()
-        js.name = self.all_joint_names
-        js.position = [
-            float(self.q[self.name_to_q_index[name]]) if name in self.right_joint_names else 0.0
-            for name in self.all_joint_names
-        ]
+        js.name = list(_joint_index_to_ros_name.values())
+        js.position = [float(self.q[self.name_to_q_index.get(n, 0)]) for n in _joint_index_to_ros_name.values()]
         self.joint_pub.publish(js)
 
     def _solve_ik(self, target: SE3, max_iter=50, tol=1e-4, damping=1e-6):
@@ -237,22 +240,21 @@ class RightArmIKController(Node):
             pin.updateFramePlacements(self.model, self.data)
             M_cur = self.data.oMf[self.eff_frame_id]
             err_tf = M_cur.inverse() * target
-            err    = pin.log(err_tf).vector
+            err = pin.log(err_tf).vector
             if np.linalg.norm(err) < tol:
                 return q
-            J6    = pin.computeFrameJacobian(
-                self.model, self.data, q,
-                self.eff_frame_id,
-                pin.LOCAL_WORLD_ALIGNED
-            )
+            J6 = pin.computeFrameJacobian(self.model, self.data, q,
+                                            self.eff_frame_id,
+                                            pin.LOCAL_WORLD_ALIGNED)
             J_red = J6[:, free_nv:]
-            JJt   = J_red @ J_red.T
-            dq    = J_red.T @ np.linalg.solve(JJt + damping * np.eye(6), err)
+            JJt = J_red @ J_red.T
+            dq = J_red.T @ np.linalg.solve(JJt + damping * np.eye(6), err)
             q[self.actuated_idx] += dq
         self.get_logger().warn("IK did not converge")
         return None
 
     def _on_estop(self):
+        self.get_logger().error("Emergency stop triggered")
         if not self.using_robot:
             self.emergency_stop = True
             return
@@ -262,37 +264,21 @@ class RightArmIKController(Node):
         cmd.motor_cmd[G1JointIndex.kNotUsedJoint].q = 1
         for i in ALL_JOINT_INDICES:
             m = cmd.motor_cmd[i]
-            m.mode = 0
-            m.q = 0.0
-            m.dq = 0.0
-            m.tau = 0.0
-            m.kp = 60.0
-            m.kd = 1.5
+            m.mode, m.q, m.dq, m.tau, m.kp, m.kd = 0, 0.0, 0.0, 0.0, 60.0, 1.5
         cmd.crc = self.crc.Crc(cmd)
         self.cmd_pub.Write(cmd)
         self.emergency_stop = True
 
 
-def main():
-    rclpy.init()
-    node = RightArmIKController()
-
-    ros_thread = threading.Thread(target=lambda: rclpy.spin(node), daemon=True)
-    ros_thread.start()
-
+def main(args=None):
+    rclpy.init(args=args)
     app = QApplication(sys.argv)
-    window = QWidget()
-    window.setWindowTitle("Emergency Stop")
-    layout = QVBoxLayout(window)
-    btn = QPushButton("EMERCENY STOP")
-    btn.setStyleSheet("font-size: 24px; background-color: red; color: white;")
-    btn.clicked.connect(node._on_estop)
-    layout.addWidget(btn)
-    window.show()
+    widget = RightArmIKController()
+    widget.show()
     app.exec_()
-
-    node.destroy_node()
+    widget.destroy_node()
     rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()
