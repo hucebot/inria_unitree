@@ -26,7 +26,8 @@ setup(
             'joint_controller = inria_unitree.joint_controller:main',
             'interactive_marker = inria_unitree.interactive_marker:main',
             'robot_state = inria_unitree.robot_state:main',
-            'loco_client = inria_unitree.loco_client:G1LocoClient',
+            'loco_client = inria_unitree.loco_client:main',
+            'joystick = inria_unitree.joystick:main',
         ],
     },
 )
