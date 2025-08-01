@@ -26,7 +26,7 @@ class RightHandMarker(Node):
         try:
             trans = self.tf_buffer.lookup_transform(
                 'pelvis',
-                'right_wrist_pitch_link',
+                'right_hand_point_contact',
                 rclpy.time.Time())
             
             int_marker = InteractiveMarker()
@@ -39,6 +39,8 @@ class RightHandMarker(Node):
             int_marker.pose.position.x = trans.transform.translation.x
             int_marker.pose.position.y = trans.transform.translation.y
             int_marker.pose.position.z = trans.transform.translation.z
+
+            print(int_marker.pose.position)
             # Orientation
             int_marker.pose.orientation = trans.transform.rotation
 

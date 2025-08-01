@@ -45,6 +45,14 @@ RUN . /opt/ros/${ROS_DISTRO}/setup.sh && \
 RUN pip install pyqt5 pin meshcat pip3 evdev
 RUN apt install evtest
 
+RUN apt update
+RUN apt install ros-${ROS_DISTRO}-rosidl-default-generators
+
+WORKDIR /ros2_ws/src
+RUN git clone https://github.com/CDonosoK/astroviz_interfaces.git
+RUN apt update
+RUN apt install ros-${ROS_DISTRO}-rmw-cyclonedds-cpp
+
 RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> /root/.bashrc && \
     echo "source /ros2_ws/install/setup.bash" >> /root/.bashrc
 

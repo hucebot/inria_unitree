@@ -11,6 +11,16 @@ from rclpy.qos import QoSProfile
 from unitree_sdk2py.core.channel import ChannelSubscriber, ChannelFactoryInitialize
 from unitree_sdk2py.idl.unitree_hg.msg.dds_ import LowState_
 
+def quaternion_multiply(q1, q2):
+    """Multiplies two quaternions."""
+    w1, x1, y1, z1 = q1
+    w2, x2, y2, z2 = q2
+    return [
+        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+    ]
 
 class G1JointIndex:
     LeftHipPitch     = 0
@@ -113,10 +123,22 @@ class RosBridge(Node):
         imu_msg.header.stamp = self.get_clock().now().to_msg()
         imu_msg.header.frame_id = "imu_link"
 
-        imu_msg.orientation.x = msg.imu_state.quaternion[0]
-        imu_msg.orientation.y = msg.imu_state.quaternion[1]
-        imu_msg.orientation.z = msg.imu_state.quaternion[2]
-        imu_msg.orientation.w = msg.imu_state.quaternion[3]
+        q_raw = [
+            msg.imu_state.quaternion[0],
+            msg.imu_state.quaternion[1],
+            msg.imu_state.quaternion[2],
+            msg.imu_state.quaternion[3],
+        ]
+        # quaternion de 180° sobre X: sin(π/2)=1, cos(π/2)=0
+        q_flip = [0.0, 0.0, 0.0, 0.0]
+
+        # corrige la orientación
+        q_corrected = quaternion_multiply(q_flip, q_raw)
+
+        imu_msg.orientation.x = q_corrected[0]
+        imu_msg.orientation.y = q_corrected[1]
+        imu_msg.orientation.z = q_corrected[2]
+        imu_msg.orientation.w = q_corrected[3]
         imu_msg.angular_velocity.x = msg.imu_state.gyroscope[0]
         imu_msg.angular_velocity.y = msg.imu_state.gyroscope[1]
         imu_msg.angular_velocity.z = msg.imu_state.gyroscope[2]
