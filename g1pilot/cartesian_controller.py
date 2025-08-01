@@ -99,7 +99,7 @@ class RightArmIKController(Node, QWidget):
         qos = QoSProfile(depth=10)
         self.ik_pub = self.create_publisher(JointState, '/ik_joint_states', qos)
         self.create_subscription(JointState, '/joint_states', self._joint_state_cb, qos)
-        self.create_subscription(PoseStamped, '/right_hand_goal', self._ik_target_cb, qos)
+        self.create_subscription(PoseStamped, '/g1pilot/right_hand_goal', self._ik_target_cb, qos)
 
 
         pkg_share = get_package_share_directory('g1_description')

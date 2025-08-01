@@ -1,1 +1,1 @@
-docker build -t inria_unitree .
+docker build -t g1pilot .

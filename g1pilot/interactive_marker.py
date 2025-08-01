@@ -12,7 +12,7 @@ class RightHandMarker(Node):
     def __init__(self):
         super().__init__('right_hand_marker')
         self.server = InteractiveMarkerServer(self, "right_hand_goal_marker")
-        self.pose_pub = self.create_publisher(PoseStamped, '/right_hand_goal', 1)
+        self.pose_pub = self.create_publisher(PoseStamped, '/g1pilot/right_hand_goal', 1)
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)

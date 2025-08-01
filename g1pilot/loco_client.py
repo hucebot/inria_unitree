@@ -58,7 +58,7 @@ class G1LocoClient(Node):
 
         self.create_subscription(
             Joy,
-            '/joy',
+            '/g1pilot/joy',
             self.joystick_callback,
             10
         )
@@ -111,16 +111,17 @@ class G1LocoClient(Node):
                 self.get_logger().info("Already balanced, no action taken.")
             return
 
-        
-        vx = msg.axes[1] * 0.5
-        vy = msg.axes[0] * 0.5
-        yaw = msg.axes[3] * 0.5
+        # We only send commands if the dead man button is pressed and the robot is balanced and not stopped
+        if msg.buttons[2] == 1 and not self.robot_stopped and self.balanced:
+            vx = msg.axes[1] * 0.5
+            vy = msg.axes[0] * 0.5
+            yaw = msg.axes[3] * 0.5
 
-        if abs(vx) < 0.05 and abs(vy) < 0.05 and abs(yaw) < 0.05:
-            self.robot.StopMove()
-            return
+            if abs(vx) < 0.05 and abs(vy) < 0.05 and abs(yaw) < 0.05:
+                self.robot.StopMove()
+                return
 
-        self.robot.Move(vx=vx, vy=vy, vyaw=yaw, continous_move=True)
+            self.robot.Move(vx=vx, vy=vy, vyaw=yaw, continous_move=True)
 
     def entering_balancing(self, max_height=0.5, step=0.02):
         height = 0.0

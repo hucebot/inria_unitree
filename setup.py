@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'inria_unitree'
+package_name = 'g1pilot'
 
 setup(
     name=package_name,
@@ -21,13 +21,12 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'ros_bridge = inria_unitree.ros_bridge:main',
-            'cartesian_controller = inria_unitree.cartesian_controller:main',
-            'joint_controller = inria_unitree.joint_controller:main',
-            'interactive_marker = inria_unitree.interactive_marker:main',
-            'robot_state = inria_unitree.robot_state:main',
-            'loco_client = inria_unitree.loco_client:main',
-            'joystick = inria_unitree.joystick:main',
+            'cartesian_controller = g1pilot.cartesian_controller:main',
+            'joint_controller = g1pilot.joint_controller:main',
+            'interactive_marker = g1pilot.interactive_marker:main',
+            'robot_state = g1pilot.robot_state:main',
+            'loco_client = g1pilot.loco_client:main',
+            'joystick = g1pilot.joystick:main',
         ],
     },
 )
