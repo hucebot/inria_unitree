@@ -5,6 +5,7 @@ from sensor_msgs.msg import JointState, Imu
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Header
 from geometry_msgs.msg import Pose, Twist, Point, PointStamped
+from astroviz_interfaces.msg import MotorState, MotorStateList
 
 from rclpy.qos import QoSProfile
 
@@ -90,21 +91,22 @@ _joint_index_to_ros_name = {
 }
 
 
-class RosBridge(Node):
+class RobotState(Node):
     def __init__(self):
-        super().__init__('ros_lowstate_reader')
+        super().__init__('RobotState')
 
         self.declare_parameter('interface', 'eth0')
         interface = self.get_parameter('interface').get_parameter_value().string_value
         self.get_logger().info(f'Using interface: {interface}')
-        self.ns = ''
+        self.ns = '/g1pilot'
 
         ChannelFactoryInitialize(0, interface)
 
         qos_profile = QoSProfile(depth=10)
-        self.joint_pub = self.create_publisher(JointState, f"{self.ns}/joint_states", qos_profile)
+        self.joint_pub = self.create_publisher(JointState, "/joint_states", qos_profile)
         self.imu_publisher = self.create_publisher(Imu, f"{self.ns}/imu", qos_profile)
         self.odometry_pub = self.create_publisher(Odometry, f"{self.ns}/odometry", qos_profile)
+        self.motor_state_pub = self.create_publisher(MotorStateList, f"{self.ns}/motor_state", QoSProfile(depth=10))
 
         self.joint_indices = sorted(_joint_index_to_ros_name.keys())
 
@@ -129,10 +131,8 @@ class RosBridge(Node):
             msg.imu_state.quaternion[2],
             msg.imu_state.quaternion[3],
         ]
-        # quaternion de 180° sobre X: sin(π/2)=1, cos(π/2)=0
         q_flip = [0.0, 0.0, 0.0, 0.0]
 
-        # corrige la orientación
         q_corrected = quaternion_multiply(q_flip, q_raw)
 
         imu_msg.orientation.x = q_corrected[0]
@@ -148,7 +148,15 @@ class RosBridge(Node):
         self.imu_publisher.publish(imu_msg)
 
         posiciones = []
+        motor_list_msg = MotorStateList()
         for idx in self.joint_indices:
+            motor_state = MotorState()
+            motor_state.name = _joint_index_to_ros_name[idx]
+            motor_state.temperature = float(msg.motor_state[idx].temperature[0])
+            motor_state.voltage = float(msg.motor_state[idx].vol)
+            motor_state.position = float(msg.motor_state[idx].q)
+            motor_state.velocity = float(msg.motor_state[idx].dq)
+            motor_list_msg.motor_list.append(motor_state)
             if idx < len(msg.motor_state):
                 posiciones.append(msg.motor_state[idx].q)
             else:
@@ -158,6 +166,8 @@ class RosBridge(Node):
                     f'but at least index {idx} was expected. Not publishing.'
                 )
                 return
+
+        self.motor_state_pub.publish(motor_list_msg)
 
         if len(posiciones) != len(self.joint_state_msg.name):
             self.get_logger().error(
@@ -174,7 +184,7 @@ class RosBridge(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = RosBridge()
+    node = RobotState()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

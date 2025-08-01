@@ -10,7 +10,7 @@ class DirectJoyPublisher(Node):
     def __init__(self):
         super().__init__('direct_joy_publisher')
 
-        self.publisher = self.create_publisher(Joy, '/inria_unitree/joy', 10)
+        self.publisher = self.create_publisher(Joy, '/g1pilot/joy', 10)
 
         self.declare_parameter("publish_rate", 50.0)
         self.rate = self.get_parameter("publish_rate").get_parameter_value().double_value

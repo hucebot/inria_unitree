@@ -5,7 +5,7 @@ def generate_launch_description():
     return LaunchDescription([
         # Nodo que lee y publica JointStates
         Node(
-            package='inria_unitree',
+            package='g1pilot',
             executable='ros_bridge',
             name='ros_bridge',
             parameters=[{'interface': 'eth0'}],
