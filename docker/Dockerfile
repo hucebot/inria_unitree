@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -yy \
     ros-${ROS_DISTRO}-xacro \
     ros-${ROS_DISTRO}-rviz2 \
     ros-${ROS_DISTRO}-pcl-conversions \
+    ros-${ROS_DISTRO}-joy \
     libpcl-dev \
     terminator \
     git \
@@ -41,7 +42,8 @@ WORKDIR /ros2_ws
 RUN . /opt/ros/${ROS_DISTRO}/setup.sh && \
     colcon build --cmake-args -DROS_EDITION=ROS2 -DHUMBLE_ROS=humble
 
-RUN pip install pyqt5 pin meshcat
+RUN pip install pyqt5 pin meshcat pip3 evdev
+RUN apt install evtest
 
 RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> /root/.bashrc && \
     echo "source /ros2_ws/install/setup.bash" >> /root/.bashrc
