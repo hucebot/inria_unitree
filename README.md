@@ -107,6 +107,12 @@ sh run.sh
 - 🎯 **Purpose:** Integrates a **game controller (joystick)** to manually control the robot.  
 - 🛠️ **Use case:** Remote teleoperation for research or demonstrations.  
 
+#### **Basic Controls**
+- **L1** → Emergency Stop → The robot enters **Damp Mode** (safe state).
+- **⬆️ D-Pad Up** → Switches the robot to **FSM 4**, making it ready to receive commands.
+- **R1** → Activates **Balance Mode**.
+- **Left Joystick** → Controls **linear movements** (forward, backward, sideways).
+- **Right Joystick** → Controls **angular rotation** (turning).
 
 ## Usage
 Once you have the docker image running, you can run the following command to start the unitree node:
