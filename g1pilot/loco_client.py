@@ -28,19 +28,21 @@ def _rpc_get_int(client, api_id):
 class G1LocoClient(Node):
     def __init__(self):
         super().__init__("g1_loco_client")
-        ChannelFactoryInitialize(0, 'eth0')
-        self.robot = LocoClient()
-        self.robot.SetTimeout(10.0)
-        self.robot.Init()
-        self.robot.Damp()
-        self.balanced = False
-        self.robot_stopped = False
 
-        self.current_id = self.get_fsm_id()
-        self.current_mode = self.get_fsm_mode()
-        print(f"Current FSM ID: {self.current_id}, Mode: {self.current_mode}")
-        self.robot.SetFsmId(4)
-        print(f"Set FSM ID to: {self.get_fsm_id()}")
+        self.using_robot = True
+        self.robot_stopped = False
+        self.balanced = False
+        self.prev_buttons = {}
+
+        if self.using_robot:
+            ChannelFactoryInitialize(0, 'eth0')
+            self.robot = LocoClient()
+            self.robot.SetTimeout(10.0)
+            self.robot.Init()
+            self.robot.Damp()
+            self.current_id = self.get_fsm_id()
+            self.current_mode = self.get_fsm_mode()
+            print(f"Current FSM ID: {self.current_id}, Mode: {self.current_mode}")
 
         self.create_subscription(
             Bool,
@@ -85,43 +87,58 @@ class G1LocoClient(Node):
             self.get_logger().info("Already balanced, no action taken.")
 
     def joystick_callback(self, msg: Joy):
+        if not self.prev_buttons:
+            self.prev_buttons = {i: 0 for i in range(len(msg.buttons))}
+
         if not self.balanced:
             self.get_logger().warn("Robot is not balanced, cannot move.")
-            return
 
         if self.robot_stopped:
             self.get_logger().warn("Robot is stopped, cannot move.")
-            return
 
-        # button for emergency stop
-        if msg.buttons[0] == 1:
+        if msg.axes[-1] == -1.0:
+            self.robot.SetFsmId(4)
+            print(f"Set FSM ID to: {self.get_fsm_id()}")
+            self.robot_stopped = False
+            self.balanced = False
+        
+        if msg.buttons[0] == 1 and self.prev_buttons[0] == 0:
+            self.robot.ShakeHand()
+
+        # button for emergency stop - L1
+        if msg.buttons[4] == 1:
             self.get_logger().warn("Emergency stop button pressed!")
             self.robot_stopped = True
             self.balanced = False
             self.robot.Damp()
-            return
         
-        # button for starting balancing
-        if msg.buttons[1] == 1:
+        # button for starting balancing - R1
+        if msg.buttons[5] == 1:
+            print("R1 button pressed, starting balancing procedure...")
             if not self.balanced:
                 self.get_logger().info("Starting balancing procedure...")
                 self.entering_balancing(max_height=0.5, step=0.02)
                 self.get_logger().info("Balancing procedure completed.")
             else:
                 self.get_logger().info("Already balanced, no action taken.")
-            return
 
-        # We only send commands if the dead man button is pressed and the robot is balanced and not stopped
-        if msg.buttons[2] == 1 and not self.robot_stopped and self.balanced:
-            vx = msg.axes[1] * 0.5
-            vy = msg.axes[0] * 0.5
-            yaw = msg.axes[3] * 0.5
+        # We only send commands if the dead man button is pressed (L2) and the robot is balanced and not stopped
+        if msg.buttons[7] == 0 and not self.robot_stopped and self.balanced:
+            self.robot.StopMove()
 
-            if abs(vx) < 0.05 and abs(vy) < 0.05 and abs(yaw) < 0.05:
+        if msg.buttons[7] == 1 and not self.robot_stopped and self.balanced:
+            vx = round(msg.axes[1] * 0.2 * -1, 2)
+            vy = round(msg.axes[0] * 0.2, 2)
+            yaw = round(msg.axes[3] * 0.2, 2)
+
+            self.get_logger().info(f"Moving with vx: {vx}, vy: {vy}, yaw: {yaw}")
+            if abs(vx) < 0.03 and abs(vy) < 0.03 and abs(yaw) < 0.03:
                 self.robot.StopMove()
                 return
 
             self.robot.Move(vx=vx, vy=vy, vyaw=yaw, continous_move=True)
+
+        self.prev_buttons = {i: msg.buttons[i] for i in range(len(msg.buttons))}
 
     def entering_balancing(self, max_height=0.5, step=0.02):
         height = 0.0

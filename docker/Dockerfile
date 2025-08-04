@@ -42,16 +42,15 @@ WORKDIR /ros2_ws
 RUN . /opt/ros/${ROS_DISTRO}/setup.sh && \
     colcon build --cmake-args -DROS_EDITION=ROS2 -DHUMBLE_ROS=humble
 
-RUN pip install pyqt5 pin meshcat pip3 evdev
-RUN apt install evtest
+RUN pip install pyqt5 pin meshcat evdev
 
 RUN apt update
-RUN apt install ros-${ROS_DISTRO}-rosidl-default-generators
+RUN apt install ros-${ROS_DISTRO}-rosidl-default-generators -y
 
 WORKDIR /ros2_ws/src
 RUN git clone https://github.com/CDonosoK/astroviz_interfaces.git
 RUN apt update
-RUN apt install ros-${ROS_DISTRO}-rmw-cyclonedds-cpp
+RUN apt install ros-${ROS_DISTRO}-rmw-cyclonedds-cpp -y
 
 RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> /root/.bashrc && \
     echo "source /ros2_ws/install/setup.bash" >> /root/.bashrc
